@@ -94,8 +94,10 @@ const importing = (status: string | null) =>
                 <DialogTitle>Import scans from Nessus</DialogTitle>
                 <DialogDescription>
                     Create and launch scans in the Nessus web UI, then import
-                    their results here. Nessus Essentials does not allow
-                    launching scans through its API.
+                    their results here. Tip: a scan whose name contains the
+                    project code as a separate word (e.g.
+                    <code>VA_POS</code> for POS) is imported automatically, and
+                    its PDF report is generated when it finishes.
                 </DialogDescription>
             </DialogHeader>
 

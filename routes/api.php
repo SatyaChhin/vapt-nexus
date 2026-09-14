@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\NessusServerController;
 use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ScanController;
 use App\Http\Controllers\Api\ScanImportController;
 use Illuminate\Support\Facades\Route;
@@ -58,4 +59,8 @@ Route::middleware('throttle:api')->group(function () {
         ->scopeBindings()
         ->whereNumber('plugin')
         ->name('projects.scans.plugin');
+
+    Route::post('projects/{project}/scans/{scan}/reports', [ReportController::class, 'store'])
+        ->scopeBindings()
+        ->name('projects.scans.reports.store');
 });

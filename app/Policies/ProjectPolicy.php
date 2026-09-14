@@ -46,6 +46,15 @@ class ProjectPolicy
         return in_array($user->roleIn($project), [ProjectRole::Manager, ProjectRole::Analyst], true);
     }
 
+    /**
+     * Delete generated reports. Reports may already be with a client, so
+     * this is limited to managers (and admins).
+     */
+    public function deleteReports(User $user, Project $project): bool
+    {
+        return $user->roleIn($project) === ProjectRole::Manager;
+    }
+
     public function delete(User $user, Project $project): bool
     {
         return false;

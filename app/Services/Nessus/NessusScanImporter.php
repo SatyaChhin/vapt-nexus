@@ -15,6 +15,7 @@ use App\Models\VulnerabilityInstance;
 use App\Services\AuditLogger;
 use App\Services\Nessus\Exceptions\NessusException;
 use App\Services\Nessus\Exceptions\NessusRequestException;
+use App\Services\Reports\ScanReportService;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Date;
@@ -38,7 +39,10 @@ class NessusScanImporter
     /** @var array<int, Vulnerability> */
     private array $plugins = [];
 
-    public function __construct(private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly ScanReportService $reports,
+    ) {}
 
     /**
      * Scans on each Nessus server assigned to the project, flagged with their
@@ -97,9 +101,9 @@ class NessusScanImporter
 
     /**
      * Registers a Nessus scan in the project (or reuses its existing record)
-     * and queues the import.
+     * and queues the import. A null user means the automatic sync.
      */
-    public function queue(Project $project, NessusServer $server, int $nessusScanId, User $user): Scan
+    public function queue(Project $project, NessusServer $server, int $nessusScanId, ?User $user = null): Scan
     {
         if (! $project->nessusServers()->whereKey($server->id)->exists()) {
             throw ValidationException::withMessages([
@@ -127,7 +131,7 @@ class NessusScanImporter
                 'nessus_server_id' => $server->id,
             ]);
             $scan->nessus_scan_id = $nessusScanId;
-            $scan->created_by = $user->id;
+            $scan->created_by = $user?->id;
         }
 
         return $this->dispatch($scan, $user);
@@ -136,7 +140,7 @@ class NessusScanImporter
     /**
      * Pulls the latest results of an already imported scan again.
      */
-    public function resync(Scan $scan, User $user): Scan
+    public function resync(Scan $scan, ?User $user = null): Scan
     {
         if ($scan->nessus_server_id === null || $scan->nessus_scan_id === null) {
             throw ValidationException::withMessages([
@@ -178,6 +182,11 @@ class NessusScanImporter
             'hosts' => $scan->scanned_hosts,
             'findings' => $scan->total_findings,
         ], user: $user);
+
+        // A finished Nessus run gets its report once; re-syncing the same run does not add another.
+        if ($scan->status === ScanStatus::Imported && ! $this->reports->hasReportForCurrentRun($scan)) {
+            $this->reports->queue($scan, $user);
+        }
     }
 
     public function fail(Scan $scan, string $message, ?User $user = null): void
@@ -190,7 +199,7 @@ class NessusScanImporter
         $this->audit->log('scan.import_failed', $scan, metadata: ['message' => $message], user: $user);
     }
 
-    private function dispatch(Scan $scan, User $user): Scan
+    private function dispatch(Scan $scan, ?User $user): Scan
     {
         $busy = in_array($scan->status, [ScanStatus::Queued, ScanStatus::Importing], true)
             && $scan->updated_at?->gt(now()->subMinutes(self::STALE_AFTER_MINUTES));
@@ -357,6 +366,7 @@ class NessusScanImporter
         $scan->hosts()->whereNotIn('id', $hostIds)->delete();
 
         $scan->forceFill([
+            'nessus_run_uuid' => Str::limit((string) $this->text($info['uuid'] ?? null), 100, '') ?: null,
             'name' => Str::limit($this->text($info['name'] ?? null) ?? $scan->name, 150, ''),
             'targets' => $this->text($info['targets'] ?? null) ?? $scan->targets,
             'status' => $status,
@@ -493,7 +503,7 @@ class NessusScanImporter
             'canceled', 'cancelled', 'stopped' => [ScanStatus::Cancelled, 'The scan was stopped in Nessus before it finished, so these results are partial.'],
             'aborted' => [ScanStatus::Failed, 'The scan was aborted in Nessus, so these results are partial.'],
             default => [ScanStatus::Running, sprintf(
-                'The scan is still %s in Nessus, so these results are partial. Re-sync once it has finished.',
+                'The scan is still %s in Nessus, so these results are partial. They update automatically when it finishes.',
                 $nessusStatus !== '' ? $nessusStatus : 'running',
             )],
         };

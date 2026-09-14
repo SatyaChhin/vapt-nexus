@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
  * @property int $project_id
  * @property int|null $nessus_server_id
  * @property int|null $nessus_scan_id
+ * @property string|null $nessus_run_uuid UUID of the Nessus run last imported.
  * @property string $name
  * @property string|null $description
  * @property string $targets

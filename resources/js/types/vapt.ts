@@ -79,6 +79,7 @@ export type RecentScan = {
     medium_count: number;
     low_count: number;
     error_message: string | null;
+    imported_at: string | null;
     finished_at: string | null;
     created_at: string | null;
 };
@@ -183,6 +184,22 @@ export type TopHost = {
     high: number;
 };
 
+export type ReportStatus = 'pending' | 'generating' | 'completed' | 'failed';
+
+export type Report = {
+    id: number;
+    project_id: number;
+    scan_id: number | null;
+    scan_name?: string | null;
+    report_number: string;
+    title: string;
+    status: ReportStatus;
+    /** Null when the report was generated automatically. */
+    created_by?: string | null;
+    generated_at: string | null;
+    created_at: string | null;
+};
+
 export type ProjectDashboard = {
     assets: number;
     scans: number;
@@ -190,6 +207,7 @@ export type ProjectDashboard = {
     severity: SeverityCounts;
     recent_scans: RecentScan[];
     top_hosts: TopHost[];
+    recent_reports: Report[];
 };
 
 export type ConnectionTestResult = {

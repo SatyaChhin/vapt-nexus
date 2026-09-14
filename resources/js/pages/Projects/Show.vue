@@ -5,23 +5,31 @@ import { computed, watch } from 'vue';
 import Heading from '@/components/Heading.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import ConfirmDeleteButton from '@/components/vapt/ConfirmDeleteButton.vue';
+import DeleteProjectDialog from '@/components/vapt/DeleteProjectDialog.vue';
 import EmptyState from '@/components/vapt/EmptyState.vue';
+import GenerateReportButton from '@/components/vapt/GenerateReportButton.vue';
 import ImportNessusScanDialog from '@/components/vapt/ImportNessusScanDialog.vue';
 import NessusStatusBadge from '@/components/vapt/NessusStatusBadge.vue';
+import ReportList from '@/components/vapt/ReportList.vue';
 import ScanStatusBadge from '@/components/vapt/ScanStatusBadge.vue';
 import SeverityBadge from '@/components/vapt/SeverityBadge.vue';
 import SeveritySummary from '@/components/vapt/SeveritySummary.vue';
 import StatCard from '@/components/vapt/StatCard.vue';
 import { formatDateTime, titleCase } from '@/lib/format';
-import { destroy, edit, index, show } from '@/routes/projects';
+import { edit, index, show } from '@/routes/projects';
 import { show as showScan } from '@/routes/projects/scans';
 import type { Project, ProjectDashboard } from '@/types';
 
 const props = defineProps<{
     project: Project;
     dashboard: ProjectDashboard;
-    can: { importScans: boolean };
+    can: {
+        importScans: boolean;
+        generateReports: boolean;
+        deleteReports: boolean;
+    };
+    /** What deleting would remove; null when the user may not delete. */
+    deletion: { scans: number; findings: number; reports: number } | null;
 }>();
 
 setLayoutProps({
@@ -31,11 +39,15 @@ setLayoutProps({
     ],
 });
 
-// Refresh while an import runs on the queue.
-const importing = computed(() =>
-    props.dashboard.recent_scans.some((scan) =>
-        ['queued', 'importing'].includes(scan.status),
-    ),
+// Refresh while an import or report runs on the queue.
+const importing = computed(
+    () =>
+        props.dashboard.recent_scans.some((scan) =>
+            ['queued', 'importing'].includes(scan.status),
+        ) ||
+        props.dashboard.recent_reports.some((report) =>
+            ['pending', 'generating'].includes(report.status),
+        ),
 );
 const poll = usePoll(3000, { only: ['dashboard'] }, { autoStart: false });
 watch(importing, (active) => (active ? poll.start() : poll.stop()), {
@@ -76,11 +88,10 @@ watch(importing, (active) => (active ? poll.start() : poll.stop()), {
                 <Button v-if="project.can.update" variant="outline" as-child>
                     <Link :href="edit(project.id)"><Pencil /> Edit</Link>
                 </Button>
-                <ConfirmDeleteButton
-                    v-if="project.can.delete"
-                    :action="destroy(project.id)"
-                    :title="`Delete ${project.name}?`"
-                    description="Only projects without scans or reports can be deleted. Archive the project instead to keep its history."
+                <DeleteProjectDialog
+                    v-if="project.can.delete && deletion"
+                    :project="project"
+                    :counts="deletion"
                 />
             </div>
         </div>
@@ -196,6 +207,24 @@ watch(importing, (active) => (active ? poll.start() : poll.stop()), {
                 </ul>
             </section>
         </div>
+
+        <section class="space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h3 class="text-sm font-medium">Reports</h3>
+                <GenerateReportButton
+                    v-if="can.generateReports"
+                    :project-id="project.id"
+                    :scans="dashboard.recent_scans"
+                />
+            </div>
+            <ReportList
+                :project-id="project.id"
+                :reports="dashboard.recent_reports"
+                :can-delete="can.deleteReports"
+                show-scan
+                empty-description="A PDF report is generated automatically when a scan finishes in Nessus. You can also generate one with the button above."
+            />
+        </section>
 
         <section class="space-y-3">
             <h3 class="text-sm font-medium">Nessus servers</h3>

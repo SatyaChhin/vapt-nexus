@@ -63,7 +63,17 @@ class ProjectController extends Controller
         return Inertia::render('Projects/Show', [
             'project' => (new ProjectResource($project->load(['creator', 'nessusServers'])))->resolve(),
             'dashboard' => $this->projects->dashboard($project),
-            'can' => ['importScans' => $request->user()->can('runScans', $project)],
+            // What a delete would remove, shown in the confirmation dialog.
+            'deletion' => $request->user()->can('delete', $project) ? [
+                'scans' => $project->scans()->count(),
+                'findings' => $project->vulnerabilityInstances()->count(),
+                'reports' => $project->reports()->count(),
+            ] : null,
+            'can' => [
+                'importScans' => $request->user()->can('runScans', $project),
+                'generateReports' => $request->user()->can('runScans', $project),
+                'deleteReports' => $request->user()->can('deleteReports', $project),
+            ],
         ]);
     }
 
@@ -86,13 +96,13 @@ class ProjectController extends Controller
         return to_route('projects.show', $project);
     }
 
-    public function destroy(Project $project): RedirectResponse
+    public function destroy(Request $request, Project $project): RedirectResponse
     {
         Gate::authorize('delete', $project);
 
-        $this->projects->delete($project);
+        $this->projects->delete($project, $request->string('confirm')->toString());
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Project deleted.')]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Project :name deleted.', ['name' => $project->name])]);
 
         return to_route('projects.index');
     }

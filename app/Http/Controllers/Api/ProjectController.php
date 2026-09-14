@@ -60,11 +60,11 @@ class ProjectController extends Controller
         return new ProjectResource($this->projects->update($project, $request->validated())->load('nessusServers'));
     }
 
-    public function destroy(Project $project): Response
+    public function destroy(Request $request, Project $project): Response
     {
         Gate::authorize('delete', $project);
 
-        $this->projects->delete($project);
+        $this->projects->delete($project, $request->string('confirm')->toString());
 
         return response()->noContent();
     }

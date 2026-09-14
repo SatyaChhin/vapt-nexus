@@ -66,6 +66,7 @@ class ScanController extends Controller
             'scan' => (new ScanResource($scan->load('nessusServer')))->resolve(),
             'hosts' => $hosts,
             'findings' => $findings,
+            // Reports are generated and listed on the project page.
             'can' => ['sync' => $request->user()->can('runScans', $project)],
         ]);
     }

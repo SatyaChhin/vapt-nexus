@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\ProjectStatus;
 use App\Models\NessusServer;
 use App\Models\Project;
 use Illuminate\Http\Request;
@@ -50,6 +51,15 @@ class HandleInertiaRequests extends Middleware
                 ],
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
+            // Sidebar sub-menu under "Projects": only projects the user may see.
+            // A closure, so partial reloads (polling) skip the query.
+            'sidebarProjects' => fn () => $user === null ? [] : Project::query()
+                ->visibleTo($user)
+                ->where('status', '!=', ProjectStatus::Archived)
+                ->orderBy('name')
+                ->get(['id', 'code', 'name'])
+                ->map(fn (Project $project) => $project->only('id', 'code', 'name'))
+                ->all(),
         ];
     }
 }

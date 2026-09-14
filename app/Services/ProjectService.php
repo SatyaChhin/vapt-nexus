@@ -3,14 +3,18 @@
 namespace App\Services;
 
 use App\Enums\ProjectRole;
+use App\Enums\ReportStatus;
+use App\Enums\ScanStatus;
 use App\Enums\Severity;
 use App\Enums\VulnerabilityState;
+use App\Http\Resources\ReportResource;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VulnerabilityInstance;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ProjectService
@@ -68,23 +72,52 @@ class ProjectService
     }
 
     /**
-     * Only projects without scan or report history can be deleted; anything
-     * else must be archived so the assessment record is preserved.
+     * Permanently deletes the project with its scans, findings, assets,
+     * reports and files. Nothing is removed from Nessus. The caller must
+     * type the project code, since this cannot be undone.
      */
-    public function delete(Project $project): void
+    public function delete(Project $project, ?string $confirmation): void
     {
-        if ($project->scans()->exists() || $project->reports()->exists()) {
+        if (strtoupper(trim((string) $confirmation)) !== $project->code) {
             throw ValidationException::withMessages([
-                'project' => 'This project has scans or reports. Archive it instead of deleting it.',
+                'confirm' => "Type the project code {$project->code} to confirm.",
             ]);
         }
 
-        $this->audit->log('project.deleted', $project, metadata: [
-            'code' => $project->code,
-            'name' => $project->name,
-        ]);
+        // A job still writing to the project would fail half-way; wait for it.
+        $busySince = now()->subMinutes(15);
+        $busy = $project->scans()->whereIn('status', [ScanStatus::Queued, ScanStatus::Importing])->where('updated_at', '>', $busySince)->exists()
+            || $project->reports()->whereIn('status', [ReportStatus::Pending, ReportStatus::Generating])->where('updated_at', '>', $busySince)->exists();
 
-        $project->delete();
+        if ($busy) {
+            throw ValidationException::withMessages([
+                'confirm' => 'A scan import or report is still running for this project. Try again in a minute.',
+            ]);
+        }
+
+        $counts = [
+            'scans' => $project->scans()->count(),
+            'findings' => $project->vulnerabilityInstances()->count(),
+            'reports' => $project->reports()->withTrashed()->count(),
+        ];
+
+        DB::transaction(function () use ($project, $counts) {
+            // Logged first: the row survives with project_id set to null.
+            $this->audit->log('project.deleted', $project, metadata: [
+                'code' => $project->code,
+                'name' => $project->name,
+                ...$counts,
+            ]);
+
+            // Scans and reports restrict deletes on purpose; everything below
+            // them (hosts, findings, raw results) cascades in the database.
+            $project->reports()->withTrashed()->forceDelete();
+            $project->scans()->delete();
+            $project->delete();
+        });
+
+        // Raw Nessus results and PDFs, only once the rows are gone.
+        Storage::disk(config('nessus.disk'))->deleteDirectory($project->storagePath());
     }
 
     /**
@@ -114,10 +147,14 @@ class ProjectService
                     'medium_count' => $scan->medium_count,
                     'low_count' => $scan->low_count,
                     'error_message' => $scan->error_message,
+                    'imported_at' => $scan->imported_at?->toIso8601String(),
                     'finished_at' => $scan->finished_at?->toIso8601String(),
                     'created_at' => $scan->created_at?->toIso8601String(),
                 ]),
             'top_hosts' => $this->topHosts($project),
+            'recent_reports' => ReportResource::collection(
+                $project->reports()->with(['scan:id,name', 'creator:id,name'])->latest('id')->limit(10)->get(),
+            )->resolve(),
         ];
     }
 

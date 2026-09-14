@@ -3,13 +3,19 @@
 namespace Tests\Feature;
 
 use App\Enums\ProjectRole;
+use App\Enums\ProjectStatus;
+use App\Enums\ReportStatus;
+use App\Enums\ScanStatus;
+use App\Models\AuditLog;
 use App\Models\NessusServer;
 use App\Models\Project;
+use App\Models\Report;
 use App\Models\Scan;
 use App\Models\ScanHost;
 use App\Models\User;
 use App\Models\VulnerabilityInstance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -76,6 +82,23 @@ class ProjectIsolationTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $mine->id);
+    }
+
+    public function test_sidebar_lists_only_the_users_active_projects(): void
+    {
+        $member = User::factory()->create();
+        $pmrs = Project::factory()->withMember($member)->create(['code' => 'PMRS', 'name' => 'PMRS']);
+        $pos = Project::factory()->withMember($member)->create(['code' => 'POS', 'name' => 'KHMER POS']);
+        Project::factory()->withMember($member)->create(['name' => 'Old', 'status' => ProjectStatus::Archived]);
+        Project::factory()->create(['name' => 'Someone else']);
+
+        $this->actingAs($member)
+            ->get(route('dashboard'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('sidebarProjects', [
+                    ['id' => $pos->id, 'code' => 'POS', 'name' => 'KHMER POS'],
+                    ['id' => $pmrs->id, 'code' => 'PMRS', 'name' => 'PMRS'],
+                ]));
     }
 
     public function test_guessing_another_projects_id_is_forbidden(): void
@@ -151,20 +174,87 @@ class ProjectIsolationTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_projects_with_scan_history_cannot_be_deleted(): void
+    public function test_admin_deletes_a_project_with_all_its_data(): void
     {
+        Storage::fake('nessus');
         $admin = User::factory()->admin()->create();
-        $withScans = Project::factory()->create();
-        Scan::factory()->for($withScans)->create();
-        $empty = Project::factory()->create();
+        $pos = Project::factory()->create(['code' => 'POS', 'name' => 'KHMER POS']);
+        $other = Project::factory()->create(['code' => 'PMRS']);
+
+        $finding = VulnerabilityInstance::factory()->for(ScanHost::factory()->for(Scan::factory()->for($pos)))->create();
+        $keep = VulnerabilityInstance::factory()->for(ScanHost::factory()->for(Scan::factory()->for($other)))->create();
+        $report = Report::factory()->for($pos)->create(['scan_id' => $finding->scan_id, 'status' => ReportStatus::Completed]);
+        Report::factory()->for($pos)->create(['status' => ReportStatus::Completed])->delete();
+        Storage::disk('nessus')->put('projects/POS/reports/2026/VULN-POS-2026-00001.pdf', 'pdf');
+        Storage::disk('nessus')->put('projects/PMRS/reports/2026/VULN-PMRS-2026-00001.pdf', 'pdf');
 
         $this->actingAs($admin)
-            ->deleteJson(route('api.projects.destroy', $withScans))
-            ->assertJsonValidationErrors('project');
-        $this->assertModelExists($withScans);
+            ->from(route('projects.show', $pos))
+            ->delete(route('projects.destroy', $pos), ['confirm' => 'pos'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('projects.index'));
 
-        $this->deleteJson(route('api.projects.destroy', $empty))->assertNoContent();
-        $this->assertModelMissing($empty);
+        $this->assertModelMissing($pos);
+        $this->assertModelMissing($finding);
+        $this->assertDatabaseMissing('scans', ['project_id' => $pos->id]);
+        $this->assertDatabaseMissing('scan_hosts', ['id' => $finding->scan_host_id]);
+        $this->assertDatabaseMissing('reports', ['id' => $report->id]);
+        $this->assertSame(0, Report::withTrashed()->where('project_id', $pos->id)->count());
+        Storage::disk('nessus')->assertMissing('projects/POS');
+
+        // The shared plugin catalogue and other projects are untouched.
+        $this->assertModelExists($finding->vulnerability);
+        $this->assertModelExists($keep);
+        Storage::disk('nessus')->assertExists('projects/PMRS/reports/2026/VULN-PMRS-2026-00001.pdf');
+
+        $log = AuditLog::query()->where('action', 'project.deleted')->sole();
+        $this->assertNull($log->project_id);
+        $this->assertSame(['code' => 'POS', 'name' => 'KHMER POS', 'scans' => 1, 'findings' => 1, 'reports' => 2], $log->metadata);
+    }
+
+    public function test_deleting_needs_the_project_code(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $project = Project::factory()->create(['code' => 'POS']);
+
+        $this->actingAs($admin)
+            ->from(route('projects.show', $project))
+            ->delete(route('projects.destroy', $project), ['confirm' => 'PMRS'])
+            ->assertRedirect(route('projects.show', $project))
+            ->assertSessionHasErrors(['confirm' => 'Type the project code POS to confirm.']);
+
+        $this->deleteJson(route('api.projects.destroy', $project))->assertJsonValidationErrors('confirm');
+        $this->assertModelExists($project);
+
+        $this->deleteJson(route('api.projects.destroy', $project), ['confirm' => 'POS'])->assertNoContent();
+        $this->assertModelMissing($project);
+    }
+
+    public function test_a_project_is_not_deleted_while_an_import_runs(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $project = Project::factory()->create(['code' => 'POS']);
+        Scan::factory()->for($project)->create(['status' => ScanStatus::Importing]);
+
+        $this->actingAs($admin)
+            ->deleteJson(route('api.projects.destroy', $project), ['confirm' => 'POS'])
+            ->assertJsonValidationErrors(['confirm' => 'still running']);
+
+        $this->assertModelExists($project);
+    }
+
+    public function test_only_admins_can_delete_projects(): void
+    {
+        $manager = User::factory()->create();
+        $project = Project::factory()->withMember($manager, ProjectRole::Manager)->create(['code' => 'POS']);
+
+        $this->actingAs($manager)
+            ->deleteJson(route('api.projects.destroy', $project), ['confirm' => 'POS'])
+            ->assertForbidden();
+
+        $this->get(route('projects.show', $project))
+            ->assertInertia(fn (Assert $page) => $page->where('project.can.delete', false)->where('deletion', null));
+        $this->assertModelExists($project);
     }
 
     public function test_dashboard_only_counts_visible_projects(): void
