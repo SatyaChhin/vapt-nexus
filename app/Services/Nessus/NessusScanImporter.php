@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\Vulnerability;
 use App\Models\VulnerabilityInstance;
 use App\Services\AuditLogger;
+use App\Services\FindingTrendService;
 use App\Services\Nessus\Exceptions\NessusException;
 use App\Services\Nessus\Exceptions\NessusRequestException;
 use App\Services\Reports\ScanReportService;
@@ -42,6 +43,7 @@ class NessusScanImporter
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly ScanReportService $reports,
+        private readonly FindingTrendService $trends,
     ) {}
 
     /**
@@ -174,6 +176,7 @@ class NessusScanImporter
         $this->plugins = [];
         DB::transaction(fn () => $this->persist($scan, $bundle));
         $this->storeRaw($scan, $bundle);
+        $this->trends->capture($scan->project);
 
         $this->audit->log('scan.imported', $scan, metadata: [
             'nessus_server_id' => $scan->nessus_server_id,

@@ -10,3 +10,6 @@ Artisan::command('inspire', function () {
 
 // Picks up new and finished Nessus scans; finished runs get their report.
 Schedule::command('nessus:sync')->everyMinute()->withoutOverlapping(10);
+
+// Imports record the trend themselves; this keeps a point for every day.
+Schedule::command('findings:snapshot')->dailyAt('23:55');

@@ -138,4 +138,12 @@ class Project extends Model
     {
         return $this->hasMany(Report::class);
     }
+
+    /**
+     * @return HasMany<FindingSnapshot, $this>
+     */
+    public function findingSnapshots(): HasMany
+    {
+        return $this->hasMany(FindingSnapshot::class);
+    }
 }

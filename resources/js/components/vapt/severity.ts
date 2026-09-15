@@ -18,6 +18,12 @@ type SeverityStyle = {
     text: string;
     /** Tinted tile background and border. */
     soft: string;
+    /** SVG line, at least 3:1 against the page in both themes. */
+    stroke: string;
+    /** SVG area wash under a line. */
+    area: string;
+    /** SVG marker fill. */
+    dot: string;
 };
 
 /** Colours follow the conventional Nessus risk palette. */
@@ -28,6 +34,9 @@ export const SEVERITY_STYLES: Record<SeverityKey, SeverityStyle> = {
         bar: 'bg-red-800 dark:bg-red-700',
         text: 'text-red-800 dark:text-red-400',
         soft: 'border-red-800/20 bg-red-800/5 dark:border-red-500/25 dark:bg-red-500/10',
+        stroke: 'stroke-red-800 dark:stroke-red-600',
+        area: 'fill-red-800/10 dark:fill-red-600/15',
+        dot: 'fill-red-800 dark:fill-red-600',
     },
     high: {
         label: 'High',
@@ -35,6 +44,9 @@ export const SEVERITY_STYLES: Record<SeverityKey, SeverityStyle> = {
         bar: 'bg-red-500',
         text: 'text-red-600 dark:text-red-400',
         soft: 'border-red-500/20 bg-red-500/5 dark:border-red-500/25 dark:bg-red-500/10',
+        stroke: 'stroke-red-500 dark:stroke-red-400',
+        area: 'fill-red-500/10 dark:fill-red-400/15',
+        dot: 'fill-red-500 dark:fill-red-400',
     },
     medium: {
         label: 'Medium',
@@ -42,6 +54,9 @@ export const SEVERITY_STYLES: Record<SeverityKey, SeverityStyle> = {
         bar: 'bg-orange-500',
         text: 'text-orange-600 dark:text-orange-400',
         soft: 'border-orange-500/25 bg-orange-500/5 dark:border-orange-500/25 dark:bg-orange-500/10',
+        stroke: 'stroke-orange-600 dark:stroke-orange-400',
+        area: 'fill-orange-600/10 dark:fill-orange-400/15',
+        dot: 'fill-orange-600 dark:fill-orange-400',
     },
     low: {
         label: 'Low',
@@ -49,6 +64,9 @@ export const SEVERITY_STYLES: Record<SeverityKey, SeverityStyle> = {
         bar: 'bg-yellow-400',
         text: 'text-yellow-700 dark:text-yellow-400',
         soft: 'border-yellow-500/30 bg-yellow-400/10 dark:border-yellow-400/25 dark:bg-yellow-400/10',
+        stroke: 'stroke-yellow-700 dark:stroke-yellow-400',
+        area: 'fill-yellow-500/15 dark:fill-yellow-400/15',
+        dot: 'fill-yellow-700 dark:fill-yellow-400',
     },
     info: {
         label: 'Info',
@@ -56,5 +74,8 @@ export const SEVERITY_STYLES: Record<SeverityKey, SeverityStyle> = {
         bar: 'bg-sky-500',
         text: 'text-sky-600 dark:text-sky-400',
         soft: 'border-sky-500/20 bg-sky-500/5 dark:border-sky-500/25 dark:bg-sky-500/10',
+        stroke: 'stroke-sky-600 dark:stroke-sky-400',
+        area: 'fill-sky-600/10 dark:fill-sky-400/15',
+        dot: 'fill-sky-600 dark:fill-sky-400',
     },
 };

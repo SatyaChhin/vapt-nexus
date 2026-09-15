@@ -21,7 +21,8 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property int $id
  * @property string $name
  * @property string $email
- * @property UserRole $role Not mass assignable; set explicitly (vapt:user command, seeder).
+ * @property UserRole $role Not mass assignable; set explicitly (vapt:user command, UserService, seeder).
+ * @property Carbon|null $disabled_at Not mass assignable; a disabled user cannot sign in.
  * @property Carbon|null $email_verified_at
  * @property string $password
  * @property string|null $two_factor_secret
@@ -56,6 +57,7 @@ class User extends Authenticatable implements PasskeyUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'disabled_at' => 'datetime',
             'two_factor_confirmed_at' => 'datetime',
         ];
     }
@@ -71,6 +73,11 @@ class User extends Authenticatable implements PasskeyUser
     public function isAdmin(): bool
     {
         return $this->role === UserRole::Admin;
+    }
+
+    public function isDisabled(): bool
+    {
+        return $this->disabled_at !== null;
     }
 
     /**

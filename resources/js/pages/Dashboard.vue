@@ -1,20 +1,33 @@
 <script setup lang="ts">
 import { Head, Link, usePage } from '@inertiajs/vue3';
-import { Crosshair, FolderKanban, Plus, ServerCog } from '@lucide/vue';
+import {
+    ChevronRight,
+    Crosshair,
+    FolderKanban,
+    Plus,
+    ServerCog,
+} from '@lucide/vue';
 import Heading from '@/components/Heading.vue';
 import { Button } from '@/components/ui/button';
 import EmptyState from '@/components/vapt/EmptyState.vue';
 import NessusStatusBadge from '@/components/vapt/NessusStatusBadge.vue';
 import ProjectCard from '@/components/vapt/ProjectCard.vue';
 import SeveritySummary from '@/components/vapt/SeveritySummary.vue';
+import SeverityTrend from '@/components/vapt/SeverityTrend.vue';
 import StatCard from '@/components/vapt/StatCard.vue';
 import { dashboard } from '@/routes';
+import { index as findingsIndex } from '@/routes/findings';
 import { index as nessusServers } from '@/routes/nessus-servers';
 import {
     create as createProject,
     index as projectsIndex,
 } from '@/routes/projects';
-import type { NessusServerStatus, Project, SeverityCounts } from '@/types';
+import type {
+    NessusServerStatus,
+    Project,
+    SeverityCounts,
+    TrendPoint,
+} from '@/types';
 
 defineProps<{
     stats: {
@@ -24,6 +37,7 @@ defineProps<{
         servers_connected: number | null;
         severity: SeverityCounts;
     };
+    trend: TrendPoint[];
     projects: Project[];
     servers:
         | {
@@ -68,7 +82,18 @@ const page = usePage();
             />
         </div>
 
-        <SeveritySummary :counts="stats.severity" />
+        <SeveritySummary :counts="stats.severity">
+            <template #actions>
+                <Link
+                    :href="findingsIndex()"
+                    class="text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5 hover:underline"
+                >
+                    View findings <ChevronRight class="size-3.5" />
+                </Link>
+            </template>
+        </SeveritySummary>
+
+        <SeverityTrend :points="trend" />
 
         <section v-if="servers !== null" class="space-y-3">
             <div class="flex items-center justify-between">

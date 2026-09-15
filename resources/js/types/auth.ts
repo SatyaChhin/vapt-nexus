@@ -16,6 +16,7 @@ export type Auth = {
     can: {
         manageNessusServers: boolean;
         createProjects: boolean;
+        manageUsers: boolean;
     };
 };
 

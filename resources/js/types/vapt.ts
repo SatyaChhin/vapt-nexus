@@ -210,6 +210,81 @@ export type ProjectDashboard = {
     recent_reports: Report[];
 };
 
+export type VulnerabilityState =
+    | 'open'
+    | 'fixed'
+    | 'accepted'
+    | 'false_positive'
+    | 'risk_accepted';
+
+/** A Laravel length-aware paginator as Inertia serializes it. */
+export type Paginated<T> = {
+    data: T[];
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    from: number | null;
+    to: number | null;
+    prev_page_url: string | null;
+    next_page_url: string | null;
+};
+
+/** One finding on the All Findings page: a plugin on one host and port. */
+export type FindingRow = {
+    id: number;
+    project: { id: number; code: string; name: string } | null;
+    scan_id: number;
+    plugin_id: number | null;
+    name: string | null;
+    family: string | null;
+    cve: string | null;
+    cve_count: number;
+    severity: SeverityKey;
+    cvss_score: number | null;
+    ip_address: string | null;
+    hostname: string | null;
+    port: number;
+    protocol: string;
+    service: string | null;
+    state: VulnerabilityState;
+    first_found_at: string | null;
+    last_found_at: string | null;
+};
+
+export type FindingFilters = {
+    q: string;
+    host: string;
+    project: number | null;
+    /** A VulnerabilityState, or "all". */
+    state: string;
+    severity: SeverityKey[];
+};
+
+/** Open findings on one day, summed over the projects the user can see. */
+export type TrendPoint = { date: string } & SeverityCounts;
+
+export type ProjectRole = 'manager' | 'analyst' | 'viewer';
+
+export type ManagedUser = {
+    id: number;
+    name: string;
+    email: string;
+    role: 'admin' | 'member';
+    projects_count: number;
+    two_factor_enabled: boolean;
+    disabled_at: string | null;
+    is_self: boolean;
+    created_at: string | null;
+};
+
+export type UserProjectOption = {
+    id: number;
+    code: string;
+    name: string;
+    status: ProjectStatus;
+};
+
 export type ConnectionTestResult = {
     success: boolean;
     message: string;

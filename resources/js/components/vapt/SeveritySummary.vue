@@ -68,6 +68,7 @@ const summary = computed(() =>
                 >
                     {{ total }} total
                 </span>
+                <slot name="actions" />
             </div>
         </div>
 

@@ -8,6 +8,7 @@ use App\Http\Resources\ProjectResource;
 use App\Models\NessusServer;
 use App\Models\Project;
 use App\Models\Scan;
+use App\Services\FindingTrendService;
 use App\Services\ProjectService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -15,7 +16,7 @@ use Inertia\Response;
 
 class DashboardController extends Controller
 {
-    public function __invoke(Request $request, ProjectService $projects): Response
+    public function __invoke(Request $request, ProjectService $projects, FindingTrendService $trends): Response
     {
         $user = $request->user();
         $visible = Project::query()->visibleTo($user);
@@ -38,6 +39,7 @@ class DashboardController extends Controller
                 'servers_connected' => $servers?->where('status', NessusServerStatus::Connected->value)->count(),
                 'severity' => $projects->severityCountsFor($user),
             ],
+            'trend' => $trends->trend($user),
             'projects' => ProjectResource::collection(
                 (clone $visible)
                     ->withCount([

@@ -26,18 +26,19 @@ const open = defineModel<boolean>('open', { required: true });
 const detail = ref<PluginDetail | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+/** The same plugin can be open in different scans (All Findings page). */
+const loadedKey = ref<string | null>(null);
 
 watch(
-    () => [props.pluginId, open.value] as const,
+    () => [props.pluginId, open.value, props.scanId] as const,
     async ([pluginId, isOpen]) => {
-        if (
-            !isOpen ||
-            pluginId === null ||
-            detail.value?.plugin_id === pluginId
-        ) {
+        const key = `${props.projectId}:${props.scanId}:${pluginId}`;
+
+        if (!isOpen || pluginId === null || loadedKey.value === key) {
             return;
         }
 
+        loadedKey.value = key;
         loading.value = true;
         error.value = null;
         detail.value = null;
@@ -50,14 +51,22 @@ watch(
                     plugin: pluginId,
                 }),
             );
-            detail.value = response.data;
+            if (loadedKey.value === key) {
+                detail.value = response.data;
+            }
         } catch (e) {
-            error.value =
-                e instanceof ApiError
-                    ? e.message
-                    : 'Could not load the finding.';
+            if (loadedKey.value === key) {
+                // Opening it again retries.
+                loadedKey.value = null;
+                error.value =
+                    e instanceof ApiError
+                        ? e.message
+                        : 'Could not load the finding.';
+            }
         } finally {
-            loading.value = false;
+            if (loadedKey.value === key || loadedKey.value === null) {
+                loading.value = false;
+            }
         }
     },
 );

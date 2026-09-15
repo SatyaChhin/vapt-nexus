@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\ProjectStatus;
 use App\Models\NessusServer;
 use App\Models\Project;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -48,6 +49,7 @@ class HandleInertiaRequests extends Middleware
                 'can' => [
                     'manageNessusServers' => (bool) $user?->can('viewAny', NessusServer::class),
                     'createProjects' => (bool) $user?->can('create', Project::class),
+                    'manageUsers' => (bool) $user?->can('viewAny', User::class),
                 ],
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
