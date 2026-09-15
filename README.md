@@ -1,146 +1,172 @@
-# VAPT Lab - Phase 0 Network Kit
+<p align="center">
+    <img src="public/npca_logo.png" alt="NPCA logo" width="120">
+</p>
 
-Scripts to build and verify the isolated VMware host-only lab that VAPT Nexus uses to reach Nessus.
-Use this lab only against systems you are authorized to test.
+# VAPT Nexus
 
-```text
-Windows host (Laravel 127.0.0.1:8000)
-│  VMnet8  192.168.168.1   NAT  (Internet for Kali / Nessus)
-│  VMnet1  192.168.56.1    Host-only (VAPT lab)
-│
-└── VMware Host-only VMnet1  192.168.56.0/24   (no gateway, no DHCP)
-     ├── Kali    eth0 NAT 192.168.168.129 (default route) + eth1 192.168.56.10
-     ├── Nessus  NAT (plugin updates)                     + 192.168.56.20:8834
-     └── Target  host-only only (isolated)                  192.168.56.30
-```
+A central place to manage vulnerability assessments (VAPT) run with Tenable Nessus. It pulls scan results
+out of Nessus, groups them by project, tracks findings over time and produces numbered PDF reports.
 
-**Nessus installed on Kali instead of its own VM?** Then Nessus is `https://192.168.56.10:8834`.
-Pass the address to the checks: `LAB_NESSUS_IP=192.168.56.10` for the Linux script and
-`-NessusIp 192.168.56.10` for the Windows script. In the app, register the server with that URL.
+Nessus runs inside an isolated VMware lab. The browser only talks to Laravel. Laravel is the only thing
+that talks to Nessus. Use this system only against hosts you are authorized to test.
 
-| File                                   | Runs on                | Changes anything?                                                                                        |
-| -------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------- |
-| `windows/Test-VaptLab.ps1`             | Windows host           | No (read-only; `-OpenNetworkEditor` only launches the VMware editor)                                     |
-| `linux/setup-lab-interface.sh inspect` | Kali / Nessus / Target | No                                                                                                       |
-| `linux/setup-lab-interface.sh apply`   | Kali / Nessus / Target | Yes: adds one static lab profile. Shows a plan, asks first, backs up to `/var/tmp/vapt-lab-backup-*.txt` |
-| `linux/setup-lab-interface.sh verify`  | Kali / Nessus / Target | No                                                                                                       |
+## Features
 
-The Linux script never modifies the interface that carries the default route (NAT), refuses interfaces
-that already hold non-lab addresses, and ignores `docker0` / bridges / veth. Re-running `apply` is safe.
+- **Projects**: each project has a short code (for example `POS`), members with a project role, and one or
+  more Nessus servers. Members only see their own projects; admins see all of them.
+- **Nessus servers**: register servers in the UI with their API keys (encrypted in the database) and check
+  them with **Test Connection**.
+- **Scan import**: import a scan that was run in the Nessus UI from a project page (**Import from Nessus**),
+  or let the sync pick it up automatically (see [How scans get in](#how-scans-get-in)).
+- **Scan results**: hosts, ports and findings per scan, with full plugin details (description, solution,
+  CVEs, CVSS).
+- **Findings**: one list of every finding across your projects, with filters for project, severity, state,
+  host and text (name, CVE or plugin ID).
+- **Dashboard**: severity totals and a trend chart of open findings over time.
+- **PDF reports**: one report per Nessus run, numbered `VULN-{CODE}-{YEAR}-{00001}`. Generated
+  automatically when a run finishes, or on demand.
+- **Users**: admins create, edit and disable accounts. A disabled user can't sign in and is signed out if
+  already logged in. Self-registration is turned off.
+- **Audit log** of important actions, and a session-authenticated JSON API under `/api`.
 
----
+### Nessus Essentials limitation
 
-## 1. Windows: create VMnet1
+Nessus Essentials (the free licence) only allows **reading** through the API. Creating, launching and
+exporting scans returns an error. So VAPT Nexus never starts scans. You run them in the Nessus UI, and
+the app imports the results and builds its own PDF reports. A Nessus Professional or Expert licence would
+remove this limit.
 
-```powershell
-# From the repository root. Launches the Virtual Network Editor elevated if VMnet1 is missing.
-powershell -ExecutionPolicy Bypass -File .\infra\lab\windows\Test-VaptLab.ps1 -OpenNetworkEditor
-```
+## Tech stack
 
-In the editor: **Change Settings > Add Network... > VMnet1**, then
+- Laravel 13 (PHP 8.4), Fortify (login, 2FA, passkeys), dompdf for PDFs
+- Vue 3 + Inertia 3 + TypeScript, Tailwind CSS 4, Vite+ (`vp`), Wayfinder
+- MariaDB, and the database queue driver
 
-- Host-only
-- [x] Connect a host virtual adapter to this network
-- [ ] Use local DHCP service
-- Subnet IP `192.168.56.0`, mask `255.255.255.0` > **Apply > OK**
+## Requirements
 
-Do **not** press _Restore Defaults_ and do not change VMnet8.
-Re-run the script (without `-OpenNetworkEditor`); the _Host-only network_ and _Routing_ sections must be PASS.
+- PHP 8.4 with `pdo_mysql` (Laravel Herd works on Windows)
+- Composer, Node.js and npm
+- MariaDB or MySQL
+- A reachable Nessus server with an API access key and secret key
 
-## 2. Add the VM adapters (VMware GUI)
-
-| VM                   | Adapter 1          | Adapter 2               |
-| -------------------- | ------------------ | ----------------------- |
-| Kali                 | NAT (keep)         | **Custom: VMnet1**      |
-| Nessus (if separate) | NAT                | **Custom: VMnet1**      |
-| Target               | **Custom: VMnet1** | none (keep it isolated) |
-
-_VM > Settings > Add... > Network Adapter > Custom: Specific virtual network > VMnet1._
-Note each new adapter's MAC (_Advanced..._) so you can match it inside the VM.
-
-## 3. Copy the script into a VM
-
-- **scp over NAT** (Kali/Nessus; needs `sudo systemctl start ssh` in the VM first):
-    ```powershell
-    scp .\infra\lab\linux\setup-lab-interface.sh <user>@192.168.168.129:~/
-    ```
-- VMware drag-and-drop / shared folder (needs `open-vm-tools-desktop`).
-- Paste it into an editor in the VM.
-
-If bash reports `bad interpreter: ^M`, fix the line endings: `sed -i 's/\r$//' setup-lab-interface.sh`.
-
-## 4. Configure each VM
+## Setup
 
 ```bash
-chmod +x setup-lab-interface.sh
+# 1. Create an empty database and a user for it in MariaDB, e.g. "vapt_nexus".
 
-./setup-lab-interface.sh inspect                 # read-only: shows the NAT iface and the host-only candidate
-sudo ./setup-lab-interface.sh apply --role kali  # or: --role nessus / --role target
-./setup-lab-interface.sh verify --role kali      # use sudo when Nessus runs on this host (ufw check)
+# 2. Install dependencies, create .env, generate the app key, migrate and build the frontend.
+composer run setup
 
-# Nessus on Kali:
-sudo LAB_NESSUS_IP=192.168.56.10 ./setup-lab-interface.sh verify --role kali
+# 3. Put the database credentials in .env (DB_DATABASE / DB_USERNAME / DB_PASSWORD),
+#    then run the migrations again if step 2 could not reach the database.
+php artisan migrate
+
+# 4. Create the first admin account.
+php artisan db:seed
 ```
 
-If more than one candidate interface is found, pick explicitly:
-`sudo ./setup-lab-interface.sh apply --role kali --iface eth1` or `--mac 00:0c:29:xx:xx:xx`.
+`db:seed` creates `admin@vapt.local` (or `VAPT_ADMIN_EMAIL`). If `VAPT_ADMIN_PASSWORD` is empty, it
+prints a random password **once**, so copy it and change it after you log in. The seeder also creates
+four demo projects (`HC`, `SS`, `OCR`, `POS`). It is safe to run again: it never duplicates or overwrites
+records, but it will recreate any demo project you deleted.
 
-What `apply` does with NetworkManager (manual equivalent):
+To create more users from the terminal instead of the UI:
 
 ```bash
-sudo nmcli connection add type ethernet ifname eth1 con-name vapt-hostonly \
-  ipv4.method manual ipv4.addresses 192.168.56.10/24 \
-  ipv4.never-default yes ipv4.ignore-auto-dns yes ipv6.method disabled
-sudo nmcli connection up vapt-hostonly
+php artisan vapt:user someone@example.com --name="Someone"          # member
+php artisan vapt:user admin2@example.com --name="Second Admin" --admin
 ```
 
-Without NetworkManager (for example Ubuntu Server), it writes `/etc/netplan/60-vapt-hostonly.yaml`
-(static address, no routes, no DNS) and runs `netplan apply`.
-
-**Windows target VM** (replace `Ethernet1` with the VMnet1 adapter's name from `Get-NetAdapter`):
-
-```powershell
-New-NetIPAddress -InterfaceAlias "Ethernet1" -IPAddress 192.168.56.30 -PrefixLength 24   # no -DefaultGateway
-```
-
-## 5. Final validation
-
-1. `verify --role kali` on Kali: 0 failed
-2. `sudo ./setup-lab-interface.sh verify --role nessus` on a separate Nessus VM: 0 failed
-3. `verify --role target` on Target: 0 failed
-4. `Test-VaptLab.ps1` on Windows: 0 failed
-
-Manual extras from Kali (authorized lab hosts only):
+## Running
 
 ```bash
-nmap -p 8834 192.168.56.20      # or .10 when Nessus runs on Kali
-nmap -sV 192.168.56.30
+composer run dev
 ```
 
-### Checklist
+This starts everything the app needs together: the web server (http://127.0.0.1:8000), the queue worker
+(imports and reports run as jobs), Vite, and the scheduler (Nessus sync and daily snapshots). If imports
+or reports sit in "queued" forever, the queue worker isn't running.
 
-```text
-[ ] VMware NAT adapter works            (Test-VaptLab: VMnet8 Up; Kali verify: Internet section)
-[ ] Kali eth0 has Internet              (Kali verify: ping 8.8.8.8 / DNS)
-[ ] VMware Host-only adapter exists     (Test-VaptLab: VMnet1 = 192.168.56.1/24)
-[ ] Kali eth1 = 192.168.56.10/24        (Kali verify: Lab interface)
-[ ] eth1 has NO default gateway         (Kali verify: no default route via eth1)
-[ ] Nessus reachable on :8834           (Kali / Nessus verify)
-[ ] Target = 192.168.56.30              (Target verify)
-[ ] Kali -> Target works                (Kali verify: Lab peers)
-[ ] Nessus -> Target works              (Nessus verify: Lab peers)
-[ ] Windows -> Nessus:8834 works        (Test-VaptLab: Nessus section)
-[ ] Laravel -> Nessus works             (App: Nessus Servers > Test Connection)
+Run only **one** `composer run dev` at a time. Extra copies leave stale servers on port 8000 and
+duplicate workers.
+
+## Configuration
+
+Main `.env` keys besides the usual Laravel ones:
+
+| Key                                   | Purpose                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DB_CONNECTION=mariadb`, `DB_*`       | Database connection                                                                                            |
+| `QUEUE_CONNECTION=database`           | Imports and PDF reports run on the queue                                                                       |
+| `NESSUS_ALLOWED_NETWORKS`             | IPs/CIDRs a Nessus server URL may point to, e.g. `192.168.56.0/24,192.168.168.0/24`. Empty allows any address |
+| `NESSUS_TIMEOUT`, `NESSUS_CONNECT_TIMEOUT` | Request timeouts to Nessus, in seconds                                                                    |
+| `NESSUS_URL`, `NESSUS_ACCESS_KEY`, `NESSUS_SECRET_KEY`, `NESSUS_VERIFY_SSL` | Optional. Only used by `db:seed` to register a first server. Normally you add servers in the UI |
+| `VAPT_ADMIN_EMAIL`, `VAPT_ADMIN_NAME`, `VAPT_ADMIN_PASSWORD` | Optional. The first admin account created by `db:seed`                            |
+
+Nessus runs inside VMware, so a server URL is never `localhost`. Use the VM's address, for example
+`https://192.168.168.129:8834` (NAT) or `https://192.168.56.10:8834` (host-only lab). Nessus uses a
+self-signed certificate, so turn **Verify SSL** off for it unless you installed a trusted one.
+
+## Roles
+
+| Role                    | Can do                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| Admin (user role)       | Everything: Nessus servers, users, all projects, creating and deleting projects   |
+| Member (user role)      | Only projects they are added to, with one of the project roles below              |
+| Manager (project role)  | Edit the project, import and re-sync scans, generate and delete reports           |
+| Analyst (project role)  | Import and re-sync scans, generate reports                                        |
+| Viewer (project role)   | Read-only access to results and reports                                           |
+
+Deleting a project is admin-only and requires typing the project code. It permanently removes the
+project's scans, findings, assets and reports. The audit log entry is kept.
+
+## How scans get in
+
+1. Create a project and assign it a Nessus server.
+2. Run the scan in the Nessus UI. **Put the project code in the scan name as a separate word**, for
+   example `VA_POS` or `POS weekly` for project `POS`.
+3. Every minute `nessus:sync` imports new scans whose name contains a project code, and re-imports scans
+   whose run has finished. Each finished run gets its PDF report automatically.
+
+You can also import any scan by hand from the project page with **Import from Nessus**.
+
+Severity comes from each plugin's CVSS v3 rating, so the counts match what the Nessus UI shows.
+
+Reports are stored privately in `storage/app/nessus/projects/{CODE}/reports/{YEAR}/` and are only
+available through the app to users who can see the project. Deleting a report removes the PDF but keeps
+its number, so numbers are never reused.
+
+## Artisan commands
+
+| Command                         | What it does                                                                      |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| `php artisan nessus:test [id]`  | Test the connection to one or all Nessus servers                                  |
+| `php artisan nessus:sync`       | Import new scans named with a project code and re-import finished runs (every minute) |
+| `php artisan findings:snapshot` | Record today's open findings per project for the trend chart (daily at 23:55)     |
+| `php artisan vapt:user`         | Create a user account (`--admin` for an administrator)                            |
+
+## Tests and code style
+
+```bash
+composer test          # Pint check, PHPStan, then the PHPUnit suite
+php artisan test       # PHPUnit only
+composer lint          # fix PHP style with Pint
+npm run check:fix      # fix JS/Vue formatting and lint
+npm run types:check    # vue-tsc
 ```
+
+## Lab network
+
+The VMware network (Windows host, Kali, Nessus and target VMs on an isolated host-only subnet) and its
+setup and check scripts are documented in [`infra/lab/README.md`](infra/lab/README.md).
 
 ## Troubleshooting
 
-| Symptom                                         | Check                                                                                                                     |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| No host-only candidate in `inspect`             | VM Settings: adapter 2 is _Custom: VMnet1_ and _Connected_; `ip -br link`                                                 |
-| Adapter shows `DOWN`                            | `sudo nmcli device connect eth1`; `sudo systemctl restart NetworkManager` (NAT reconnects by itself)                      |
-| Windows routes 192.168.56.x via another adapter | VMnet1 missing, or a VPN pushes that subnet; `Find-NetRoute -RemoteIPAddress 192.168.56.20`                               |
-| `apply` fails on activation                     | Another VM already uses the address (duplicate-address detection); `journalctl -u NetworkManager -n 50`                   |
-| Nessus port closed                              | `sudo systemctl status nessusd`; `ss -tln \| grep 8834`; `sudo ufw allow from 192.168.56.0/24 to any port 8834 proto tcp` |
-| `/server/status` not "ready"                    | Nessus is still compiling plugins after install or update; wait and re-run                                                |
-| Undo on a VM                                    | `sudo nmcli connection delete vapt-hostonly` (or remove `/etc/netplan/60-vapt-hostonly.yaml` and `sudo netplan apply`)    |
+| Symptom                                           | Check                                                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `could not find driver`                           | PHP's `pdo_mysql` extension isn't loaded. On Windows, Smart App Control can block it for Herd's PHP        |
+| Test Connection fails                             | Nessus VM is running, the URL uses the VM's IP (not `localhost`), the IP is in `NESSUS_ALLOWED_NETWORKS`, `php artisan nessus:test` |
+| Nessus says "not ready"                           | Nessus is still compiling plugins after an install or update. Wait and try again                           |
+| Imports or reports stay queued                    | The queue worker isn't running. Start `composer run dev`                                                   |
+| New scans never appear automatically              | The scan name must contain the project code as a whole word, and the scheduler must be running             |
+| Old version of the app still shows on port 8000   | A stale `php artisan serve` from an earlier run is still holding the port. Stop it and start again         |
